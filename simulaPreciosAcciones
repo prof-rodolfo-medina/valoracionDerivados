@@ -1,0 +1,108 @@
+import numpy as np
+import pandas as pd
+import matplotlib.pyplot as plt
+from scipy import stats
+import seaborn as sns
+from datetime import datetime, timedelta
+
+class StockPriceSimulator:
+    def __init__(self, mu=0.1, sigma=0.2, S0=100, days=252):
+        """
+        Inicializa el simulador de precios
+        mu: rendimiento esperado anual
+        sigma: volatilidad anual
+        S0: precio inicial
+        days: número de días a simular
+        """
+        self.mu = mu
+        self.sigma = sigma
+        self.S0 = S0
+        self.days = days
+        self.dt = 1/252  # Año comercial
+        
+    def generate_prices(self, num_paths=1):
+        """
+        Genera trayectorias de precios basadas en el modelo log-normal
+        num_paths: número de trayectorias a generar
+        """
+        np.random.seed(42)  # Para reproducibilidad
+        
+        # Generar incrementos normales
+        Z = np.random.normal(size=(self.days, num_paths))
+        
+        # Calcular rendimientos log-normales
+        returns = (self.mu - 0.5 * self.sigma**2) * self.dt + \
+                 self.sigma * np.sqrt(self.dt) * Z
+                 
+        # Calcular precios acumulados
+        prices = self.S0 * np.exp(np.cumsum(returns, axis=0))
+        
+        # Agregar precio inicial
+        prices = np.vstack([np.repeat(self.S0, num_paths), prices])
+        
+        return prices
+    
+    def estimate_parameters(self, prices):
+        """
+        Estima los parámetros del modelo a partir de los precios
+        """
+        returns = np.log(prices[1:] / prices[:-1])
+        mu_est = np.mean(returns) * 252
+        sigma_est = np.std(returns) * np.sqrt(252)
+        
+        return mu_est, sigma_est
+    
+    def plot_simulation(self, prices, title="Simulación de Precios"):
+        """
+        Visualiza las trayectorias de precios simuladas
+        """
+        dates = [datetime.now() + timedelta(days=x) for x in range(len(prices))]
+        
+        plt.figure(figsize=(12, 6))
+        plt.plot(dates, prices)
+        plt.title(title)
+        plt.xlabel("Fecha")
+        plt.ylabel("Precio")
+        plt.grid(True)
+        
+        # Formatear eje x para mostrar fechas
+        plt.gcf().autofmt_xdate()
+        
+    def validate_model(self, prices):
+        """
+        Realiza pruebas de validación del modelo
+        """
+        returns = np.log(prices[1:] / prices[:-1])
+        
+        # Test de normalidad
+        stat, p_value = stats.normaltest(returns)
+        
+        # Gráfico Q-Q
+        plt.figure(figsize=(10, 5))
+        
+        plt.subplot(1, 2, 1)
+        stats.probplot(returns, dist="norm", plot=plt)
+        plt.title("Gráfico Q-Q de rendimientos")
+        
+        plt.subplot(1, 2, 2)
+        sns.histplot(returns, kde=True)
+        plt.title("Distribución de rendimientos")
+        
+        return {"statistic": stat, "p_value": p_value}
+
+# Ejemplo de uso
+simulator = StockPriceSimulator(mu=0.12, sigma=0.25, S0=100, days=252)
+
+# Generar precios
+prices = simulator.generate_prices(num_paths=5)
+
+# Visualizar simulación
+simulator.plot_simulation(prices)
+
+# Estimar parámetros
+mu_est, sigma_est = simulator.estimate_parameters(prices)
+print(f"Parámetros estimados: mu = {mu_est:.4f}, sigma = {sigma_est:.4f}")
+
+# Validar modelo
+validation_results = simulator.validate_model(prices)
+print(f"Resultados de validación: {validation_results}")
