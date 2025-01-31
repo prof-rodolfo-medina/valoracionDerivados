@@ -1,0 +1,201 @@
+import numpy as np
+import pandas as pd
+import matplotlib.pyplot as plt
+import seaborn as sns
+from scipy import stats
+from datetime import datetime, timedelta
+import yfinance as yf
+
+class MarketDataAnalyzer:
+    def __init__(self, ticker, start_date='2020-01-01', end_date='2023-12-31'):
+        """
+        Inicializa el analizador con datos reales de mercado
+        ticker: símbolo de la acción (ej: 'AAPL' para Apple)
+        """
+        self.ticker = ticker
+        self.start_date = start_date
+        self.end_date = end_date
+        self.data = None
+        self.simulator = None
+        
+    def fetch_data(self):
+        """
+        Obtiene datos históricos usando yfinance
+        """
+        stock = yf.Ticker(self.ticker)
+        self.data = stock.history(start=self.start_date, end=self.end_date)
+        return self.data
+    
+    def calculate_returns(self):
+        """
+        Calcula rendimientos logarítmicos
+        """
+        self.returns = np.log(self.data['Close'] / self.data['Close'].shift(1)).dropna()
+        return self.returns
+    
+    def estimate_parameters(self):
+        """
+        Estima parámetros del modelo log-normal
+        """
+        returns = self.calculate_returns()
+        
+        # Estimación de parámetros anualizados
+        mu = returns.mean() * 252
+        sigma = returns.std() * np.sqrt(252)
+        
+        return mu, sigma
+    
+    def compare_with_simulation(self, num_simulations=100):
+        """
+        Compara datos reales con simulaciones
+        """
+        mu, sigma = self.estimate_parameters()
+        initial_price = self.data['Close'].iloc[0]
+        days = len(self.data)
+        
+        # Crear simulador con parámetros estimados
+        self.simulator = StockPriceSimulator(mu=mu, sigma=sigma, 
+                                           S0=initial_price, days=days)
+        
+        # Generar simulaciones
+        simulated_prices = self.simulator.generate_prices(num_paths=num_simulations)
+        
+        # Visualización
+        plt.figure(figsize=(15, 10))
+        
+        # Gráfico superior: Precios
+        plt.subplot(2, 1, 1)
+        plt.plot(self.data.index, self.data['Close'], 'k-', 
+                label='Precio Real', linewidth=2)
+        plt.plot(self.data.index, simulated_prices, 'b-', 
+                alpha=0.1, label='Simulaciones')
+        plt.title(f'Precio Real vs Simulaciones: {self.ticker}')
+        plt.legend()
+        plt.grid(True)
+        
+        # Gráfico inferior: QQ Plot de rendimientos
+        plt.subplot(2, 2, 3)
+        stats.probplot(self.returns, dist="norm", plot=plt)
+        plt.title('Q-Q Plot de Rendimientos Reales')
+        
+        # Histograma de rendimientos
+        plt.subplot(2, 2, 4)
+        sns.histplot(self.returns, kde=True)
+        plt.title('Distribución de Rendimientos Reales')
+        
+        plt.tight_layout()
+        
+    def calculate_statistics(self):
+        """
+        Calcula estadísticas descriptivas
+        """
+        stats_dict = {
+            'Rendimiento Anual': self.returns.mean() * 252,
+            'Volatilidad Anual': self.returns.std() * np.sqrt(252),
+            'Asimetría': self.returns.skew(),
+            'Curtosis': self.returns.kurtosis(),
+            'Valor p (Normalidad)': stats.normaltest(self.returns)[1]
+        }
+        
+        return pd.Series(stats_dict)
+    
+    def perform_backtesting(self, window_size=126):
+        """
+        Realiza backtesting con ventana móvil
+        """
+        rolling_mu = []
+        rolling_sigma = []
+        dates = []
+        
+        for i in range(window_size, len(self.returns)):
+            window_returns = self.returns.iloc[i-window_size:i]
+            mu = window_returns.mean() * 252
+            sigma = window_returns.std() * np.sqrt(252)
+            
+            rolling_mu.append(mu)
+            rolling_sigma.append(sigma)
+            dates.append(self.returns.index[i])
+        
+        # Visualización de parámetros móviles
+        plt.figure(figsize=(15, 6))
+        
+        plt.subplot(1, 2, 1)
+        plt.plot(dates, rolling_mu)
+        plt.title('Rendimiento Esperado Móvil')
+        plt.grid(True)
+        
+        plt.subplot(1, 2, 2)
+        plt.plot(dates, rolling_sigma)
+        plt.title('Volatilidad Móvil')
+        plt.grid(True)
+        
+        plt.tight_layout()
+
+# Ejemplo de uso con empresas reales
+def analyze_multiple_stocks(tickers=['AAPL', 'MSFT', 'GOOGL'], 
+                          start_date='2020-01-01',
+                          end_date='2023-12-31'):
+    """
+    Analiza múltiples acciones y compara sus características
+    """
+    results = []
+    
+    for ticker in tickers:
+        analyzer = MarketDataAnalyzer(ticker, start_date, end_date)
+        analyzer.fetch_data()
+        
+        # Calcular estadísticas
+        stats = analyzer.calculate_statistics()
+        stats.name = ticker
+        results.append(stats)
+        
+        # Realizar análisis visual
+        analyzer.compare_with_simulation()
+        plt.suptitle(f'Análisis de {ticker}')
+        
+        # Realizar backtesting
+        analyzer.perform_backtesting()
+        plt.suptitle(f'Backtesting de {ticker}')
+    
+    # Comparar estadísticas
+    results_df = pd.DataFrame(results)
+    print("\nComparación de Estadísticas:")
+    print(results_df)
+    
+    return results_df
+
+# Ejecutar análisis
+stocks_analysis = analyze_multiple_stocks()
+
+# Ejemplo de interpretación de resultados
+def interpret_results(results_df):
+    """
+    Proporciona interpretación de los resultados
+    """
+    for ticker in results_df.index:
+        print(f"\nAnálisis de {ticker}:")
+        print("-" * 50)
+        
+        # Rendimiento
+        mu = results_df.loc[ticker, 'Rendimiento Anual']
+        print(f"Rendimiento anual: {mu:.2%}")
+        
+        # Volatilidad
+        sigma = results_df.loc[ticker, 'Volatilidad Anual']
+        print(f"Volatilidad anual: {sigma:.2%}")
+        
+        # Normalidad
+        p_value = results_df.loc[ticker, 'Valor p (Normalidad)']
+        if p_value < 0.05:
+            print("Los rendimientos no siguen una distribución normal")
+        else:
+            print("No se puede rechazar la normalidad de los rendimientos")
+        
+        # Asimetría y Curtosis
+        skew = results_df.loc[ticker, 'Asimetría']
+        kurt = results_df.loc[ticker, 'Curtosis']
+        print(f"Asimetría: {skew:.2f}")
+        print(f"Curtosis: {kurt:.2f}")
+
+# Interpretar resultados
+interpret_results(stocks_analysis)
