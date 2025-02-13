@@ -1,0 +1,64 @@
+import numpy as np
+import pandas as pd
+import yfinance as yf
+from scipy import stats
+import matplotlib.pyplot as plt
+
+def obtener_retornos_logaritmicos(simbolo, start_date, end_date):
+    """
+    Obtiene los retornos logarítmicos de una acción.
+    """
+    # Descarga datos históricos
+    data = yf.download(simbolo, start=start_date, end=end_date)
+    # Calcula retornos logarítmicos
+    log_returns = np.log(data['Adj Close']/data['Adj Close'].shift(1)).dropna()
+    return log_returns
+
+def estimar_parametros_momentos(log_returns):
+    """
+    Estima los parámetros μ y σ utilizando el método de momentos.
+    """
+    # Primer momento (media muestral)
+    mu = np.mean(log_returns)
+    # Segundo momento centrado (varianza muestral)
+    sigma = np.std(log_returns, ddof=1)
+    
+    return mu, sigma
+
+def calcular_momentos_superiores(log_returns):
+    """
+    Calcula el sesgo y curtosis de los retornos.
+    """
+    sesgo = stats.skew(log_returns)
+    curtosis = stats.kurtosis(log_returns)
+    return sesgo, curtosis
+
+# Ejemplo de uso
+simbolo = "AAPL"
+start_date = "2023-01-01"
+end_date = "2024-01-01"
+
+# Obtener datos y calcular parámetros
+retornos = obtener_retornos_logaritmicos(simbolo, start_date, end_date)
+mu_est, sigma_est = estimar_parametros_momentos(retornos)
+sesgo_est, curtosis_est = calcular_momentos_superiores(retornos)
+
+# Imprimir resultados
+print(f"Parámetros estimados:")
+print(f"μ = {mu_est:.4f}")
+print(f"σ = {sigma_est:.4f}")
+print(f"Sesgo = {sesgo_est:.4f}")
+print(f"Curtosis = {curtosis_est:.4f}")
+
+# Visualización de la distribución
+plt.figure(figsize=(12, 6))
+plt.hist(retornos, bins=50, density=True, alpha=0.7, label='Datos históricos')
+x = np.linspace(min(retornos), max(retornos), 100)
+plt.plot(x, stats.norm.pdf(x, mu_est, sigma_est), 'r-', lw=2, 
+         label='Distribución log-normal ajustada')
+plt.title('Distribución de retornos logarítmicos')
+plt.xlabel('Retorno logarítmico')
+plt.ylabel('Densidad')
+plt.legend()
+plt.grid(True)
+plt.show()
