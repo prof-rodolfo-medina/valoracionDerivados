@@ -1,0 +1,85 @@
+import numpy as np
+from scipy import stats
+import matplotlib.pyplot as plt
+
+def simular_precios_futuros(S0, mu, sigma, dias, n_simulaciones=10000):
+    """
+    Simula precios futuros usando el modelo log-normal.
+    
+    Parámetros:
+    S0: precio inicial
+    mu: media de los retornos logarítmicos
+    sigma: volatilidad de los retornos logarítmicos
+    dias: horizonte de predicción
+    n_simulaciones: número de simulaciones Monte Carlo
+    """
+    # Ajuste del drift por la fórmula de Itô
+    drift = (mu - 0.5 * sigma**2) * dias
+    # Término de volatilidad
+    vol = sigma * np.sqrt(dias)
+    
+    # Simulación de retornos logarítmicos
+    Z = np.random.normal(0, 1, n_simulaciones)
+    log_returns = drift + vol * Z
+    
+    # Cálculo de precios futuros
+    precios_futuros = S0 * np.exp(log_returns)
+    
+    return precios_futuros
+
+def calcular_intervalos_confianza(precios_futuros, niveles_confianza=[0.90, 0.95, 0.99]):
+    """
+    Calcula intervalos de confianza para diferentes niveles.
+    """
+    intervalos = {}
+    for nivel in niveles_confianza:
+        alpha = 1 - nivel
+        intervalos[nivel] = np.percentile(precios_futuros, [alpha/2 * 100, (1-alpha/2) * 100])
+    
+    return intervalos
+
+def visualizar_predicciones(S0, precios_futuros, intervalos):
+    """
+    Visualiza la distribución de precios predichos y sus intervalos de confianza.
+    """
+    plt.figure(figsize=(12, 6))
+    
+    # Histograma de precios simulados
+    plt.hist(precios_futuros, bins=50, density=True, alpha=0.7)
+    
+    # Línea vertical para el precio actual
+    plt.axvline(S0, color='r', linestyle='--', label='Precio actual')
+    
+    # Intervalos de confianza
+    for nivel, (lower, upper) in intervalos.items():
+        plt.axvline(lower, color='g', linestyle=':', 
+                   label=f'IC {nivel*100}%')
+        plt.axvline(upper, color='g', linestyle=':')
+    
+    plt.title('Distribución de precios futuros predichos')
+    plt.xlabel('Precio')
+    plt.ylabel('Densidad')
+    plt.legend()
+    plt.grid(True)
+    plt.show()
+
+# Ejemplo de uso
+S0 = data['Adj Close'][-1]  # Último precio disponible
+dias_prediccion = 30
+
+# Realizar simulaciones
+precios_futuros = simular_precios_futuros(S0, mu_est, sigma_est, dias_prediccion)
+
+# Calcular intervalos de confianza
+intervalos = calcular_intervalos_confianza(precios_futuros)
+
+# Visualizar resultados
+visualizar_predicciones(S0, precios_futuros, intervalos)
+
+# Imprimir estadísticas resumen
+print(f"\nEstadísticas de predicción a {dias_prediccion} días:")
+print(f"Precio actual: ${S0:.2f}")
+print(f"Predicción puntual (media): ${np.mean(precios_futuros):.2f}")
+print("\nIntervalos de confianza:")
+for nivel, (lower, upper) in intervalos.items():
+    print(f"IC {nivel*100}%: [${lower:.2f}, ${upper:.2f}]")
