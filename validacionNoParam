@@ -1,0 +1,60 @@
+import numpy as np
+from scipy import stats
+import matplotlib.pyplot as plt
+import statsmodels.api as sm
+
+def validar_modelo(retornos, mu_est, sigma_est):
+    """
+    Realiza pruebas de bondad de ajuste y genera gráficos de diagnóstico.
+    """
+    # Test de Kolmogorov-Smirnov
+    ks_statistic, ks_pvalue = stats.kstest(retornos, 'norm', args=(mu_est, sigma_est))
+    
+    # Test de Anderson-Darling
+    ad_result = stats.anderson(retornos, dist='norm')
+    
+    # QQ-Plot
+    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(15, 6))
+    
+    # Gráfico 1: QQ-Plot
+    sm.graphics.qqplot(retornos, dist=stats.norm, line='45', ax=ax1)
+    ax1.set_title('Q-Q Plot')
+    
+    # Gráfico 2: Histograma vs Densidad Normal
+    ax2.hist(retornos, bins=50, density=True, alpha=0.7)
+    x = np.linspace(min(retornos), max(retornos), 100)
+    ax2.plot(x, stats.norm.pdf(x, mu_est, sigma_est), 'r-', lw=2)
+    ax2.set_title('Histograma vs Distribución Normal')
+    ax2.grid(True)
+    
+    plt.tight_layout()
+    plt.show()
+    
+    # Imprimir resultados de las pruebas
+    print("\nResultados de las pruebas de bondad de ajuste:")
+    print(f"Test Kolmogorov-Smirnov:")
+    print(f"Estadístico: {ks_statistic:.4f}")
+    print(f"Valor p: {ks_pvalue:.4f}")
+    print("\nTest Anderson-Darling:")
+    print(f"Estadístico: {ad_result.statistic:.4f}")
+    print("Valores críticos:", ad_result.critical_values)
+    
+    return ks_pvalue < 0.05  # True si se rechaza la hipótesis nula
+
+# Criterios de decisión
+def interpretar_resultados(rechazar_h0, sesgo, curtosis):
+    """
+    Interpreta los resultados de las pruebas y momentos superiores.
+    """
+    print("\nInterpretación de resultados:")
+    if rechazar_h0:
+        print("- Se rechaza la hipótesis de normalidad")
+    else:
+        print("- No se puede rechazar la hipótesis de normalidad")
+    
+    print(f"- Sesgo: {sesgo:.4f} ({'significativo' if abs(sesgo) > 0.5 else 'no significativo'})")
+    print(f"- Exceso de curtosis: {curtosis:.4f} ({'significativo' if abs(curtosis) > 1 else 'no significativo'})")
+
+# Ejemplo de uso con los datos anteriores
+rechazar_h0 = validar_modelo(retornos, mu_est, sigma_est)
+interpretar_resultados(rechazar_h0, sesgo_est, curtosis_est)
