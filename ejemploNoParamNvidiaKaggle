@@ -1,0 +1,162 @@
+import time
+import numpy as np
+import pandas as pd
+import yfinance as yf
+from scipy import stats
+import matplotlib.pyplot as plt
+from datetime import datetime, timedelta
+
+# Install and import seaborn
+#!pip install seaborn
+import seaborn as sns
+
+# Set the seaborn style
+sns.set_theme() # or plt.style.use('seaborn')
+
+#plt.style.use('seaborn')
+
+# 1. Obtención de datos
+def obtener_datos_kaggle(ruta_archivo, simbolo=None):
+    """
+    Carga datos financieros desde un archivo local de Kaggle.
+    
+    Parámetros:
+    - ruta_archivo: Ruta al archivo CSV descargado de Kaggle
+    - simbolo: Si el archivo contiene múltiples símbolos, filtra por este símbolo
+    """
+    try:
+        # Cargar datos
+        data = pd.read_csv(ruta_archivo, index_col=0, parse_dates=True)
+        
+        # Filtrar por símbolo si es necesario
+        if simbolo is not None and 'Symbol' in data.columns:
+            data = data[data['Symbol'] == simbolo]
+            
+        # Asegurar que los datos tienen las columnas necesarias
+        columnas_requeridas = ['Open', 'High', 'Low', 'Close', 'Volume']
+        if not all(col in data.columns for col in columnas_requeridas):
+            print("⚠️ El archivo no contiene todas las columnas necesarias")
+            return None
+            
+        # Calcular rendimientos logarítmicos
+        data['log_returns'] = np.log(data['Close'] / data['Close'].shift(1))
+        return data.dropna()
+        
+    except Exception as e:
+        print(f"❌ Error al cargar datos de Kaggle: {e}")
+        return None
+
+# 2. Estimación de parámetros
+def estimar_parametros(returns):
+    """
+    Calcula estimadores puntuales y sus intervalos de confianza
+    """
+    n = len(returns)
+
+    # Estimadores puntuales
+    mu = returns.mean()
+    sigma = returns.std()
+
+    # Error estándar para mu
+    se_mu = sigma / np.sqrt(n)
+
+    # Error estándar para sigma (aproximación)
+    se_sigma = sigma / np.sqrt(2*n)
+
+    # Intervalos de confianza (95%)
+    ic_mu = stats.t.interval(0.95, n-1, mu, se_mu)
+    ic_sigma = [sigma - 1.96*se_sigma, sigma + 1.96*se_sigma]
+
+    return {
+        'mu': mu,
+        'sigma': sigma,
+        'ic_mu': ic_mu,
+        'ic_sigma': ic_sigma,
+        'n': n
+    }
+
+# 3. Predicción
+def calcular_predicciones(S0, parametros, dias=30, n_sim=10000):
+    """
+    Calcula predicción puntual y por intervalos usando simulación Monte Carlo
+    """
+    mu, sigma = parametros['mu'], parametros['sigma']
+
+    # Predicción puntual
+    pred_puntual = S0 * np.exp((mu + 0.5*sigma**2) * dias)
+
+    # Simulación Monte Carlo para intervalos
+    Z = np.random.normal(0, 1, n_sim)
+    returns_sim = (mu - 0.5*sigma**2)*dias + sigma*np.sqrt(dias)*Z
+    precios_sim = S0 * np.exp(returns_sim)
+
+    # Intervalos de confianza
+    ic_90 = np.percentile(precios_sim, [5, 95])
+    ic_95 = np.percentile(precios_sim, [2.5, 97.5])
+    ic_99 = np.percentile(precios_sim, [0.5, 99.5])
+
+    return {
+        'puntual': pred_puntual,
+        'ic_90': ic_90,
+        'ic_95': ic_95,
+        'ic_99': ic_99,
+        'simulaciones': precios_sim
+    }
+
+# 4. Visualización
+def visualizar_resultados(data, parametros, predicciones):
+    """
+    Crea visualizaciones de los resultados
+    """
+    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(15, 6))
+
+    # Gráfico 1: Distribución de retornos y ajuste normal
+    returns = data['log_returns']
+    x = np.linspace(returns.min(), returns.max(), 100)
+    normal_pdf = stats.norm.pdf(x, parametros['mu'], parametros['sigma'])
+
+    ax1.hist(returns, bins=50, density=True, alpha=0.7, label='Datos históricos')
+    ax1.plot(x, normal_pdf, 'r-', label='Ajuste normal')
+    ax1.axvline(parametros['mu'], color='g', linestyle='--', label='Media')
+    ax1.axvline(parametros['ic_mu'][0], color='g', linestyle=':')
+    ax1.axvline(parametros['ic_mu'][1], color='g', linestyle=':')
+    ax1.set_title('Distribución de retornos logarítmicos')
+    ax1.legend()
+
+    # Gráfico 2: Predicciones
+    ax2.hist(predicciones['simulaciones'], bins=50, density=True, alpha=0.7)
+    ax2.axvline(predicciones['puntual'], color='r', label='Predicción puntual')
+    ax2.axvline(predicciones['ic_95'][0], color='g', linestyle='--',
+                label='IC 95%')
+    ax2.axvline(predicciones['ic_95'][1], color='g', linestyle='--')
+    ax2.set_title('Distribución de precios predichos')
+    ax2.legend()
+
+    plt.tight_layout()
+    plt.show()
+
+# Ejecución del ejemplo
+print("Análisis de Apple Inc. (AAPL)")
+print("-" * 50)
+
+# Obtener datos
+data = obtener_datos_kaggle('/content/NVDA.csv', simbolo=None)
+last_price = data['Close'][-1]
+print(f"Último precio: ${last_price:.2f}")
+
+# Estimación
+params = estimar_parametros(data['log_returns'])
+print("\nEstimadores puntuales:")
+print(f"μ = {params['mu']:.6f} ({params['ic_mu'][0]:.6f}, {params['ic_mu'][1]:.6f})")
+print(f"σ = {params['sigma']:.6f} ({params['ic_sigma'][0]:.6f}, {params['ic_sigma'][1]:.6f})")
+
+# Predicción
+preds = calcular_predicciones(last_price, params)
+print("\nPredicciones a 30 días:")
+print(f"Puntual: ${preds['puntual']:.2f}")
+print(f"IC 90%: (${preds['ic_90'][0]:.2f}, ${preds['ic_90'][1]:.2f})")
+print(f"IC 95%: (${preds['ic_95'][0]:.2f}, ${preds['ic_95'][1]:.2f})")
+print(f"IC 99%: (${preds['ic_99'][0]:.2f}, ${preds['ic_99'][1]:.2f})")
+
+# Visualización
+visualizar_resultados(data, params, preds)
