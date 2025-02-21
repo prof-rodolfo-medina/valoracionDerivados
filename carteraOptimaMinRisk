@@ -1,0 +1,44 @@
+import numpy as np
+from scipy.optimize import minimize
+import pandas as pd
+import matplotlib.pyplot as plt
+
+# Definir datos de ejemplo para 3 activos
+returns = np.array([0.10, 0.15, 0.08])  # Rendimientos esperados
+cov_matrix = np.array([[0.05, 0.02, 0.01],
+                      [0.02, 0.07, 0.02],
+                      [0.01, 0.02, 0.04]])  # Matriz de covarianzas
+
+# Función para calcular el riesgo del portafolio
+def portfolio_risk(weights):
+    return np.sqrt(np.dot(weights.T, np.dot(cov_matrix, weights)))
+
+# Restricciones
+def constraint1(weights):
+    return np.sum(weights) - 1  # La suma de los pesos debe ser 1
+
+# Optimización
+initial_weights = np.array([1/3, 1/3, 1/3])  # Pesos iniciales iguales
+bounds = tuple((0, 1) for i in range(3))  # Restricción: 0 ≤ w_i ≤ 1
+constraints = ({'type': 'eq', 'fun': constraint1})
+
+# Resolver el problema de optimización
+result = minimize(portfolio_risk, 
+                 initial_weights,
+                 method='SLSQP',
+                 bounds=bounds,
+                 constraints=constraints)
+
+optimal_weights = result.x
+min_risk = result.fun
+
+print("Pesos óptimos:", optimal_weights)
+print("Riesgo mínimo:", min_risk)
+print("Rendimiento esperado:", np.dot(optimal_weights, returns))
+
+# Visualización de la distribución óptima
+plt.figure(figsize=(10, 6))
+plt.bar(['Activo 1', 'Activo 2', 'Activo 3'], optimal_weights)
+plt.title('Distribución Óptima del Portafolio de Mínimo Riesgo')
+plt.ylabel('Peso en el Portafolio')
+plt.show()
