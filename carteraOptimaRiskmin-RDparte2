@@ -1,0 +1,179 @@
+# Optimización de Carteras con Datos Reales (Parte 2)
+# Implementación práctica de la Teoría de Carteras Mixtas
+# Universidad Internacional de La Rioja
+
+# Nota: Este archivo continúa desde la Parte 1
+# Se asume que todas las variables y funciones de la Parte 1 están disponibles
+
+# Generar carteras mixtas con diferentes niveles de aversión al riesgo
+risk_levels = [0.25, 0.5, 0.75, 1.0, 1.25, 1.5]
+mixed_portfolios = []
+
+for risk in risk_levels:
+    portfolio = get_mixed_portfolio(tangent_weights_real, current_rf_rate, 
+                                  expected_returns_array, cov_matrix_array, risk)
+    mixed_portfolios.append(portfolio)
+    
+# Mostrar resultados en una tabla
+print("Análisis de Carteras Mixtas (Datos Reales):")
+print("Risk Level | RF Weight | Tangent Weight | Return | Volatility | Sharpe")
+print("-" * 75)
+
+for i, risk in enumerate(risk_levels):
+    p = mixed_portfolios[i]
+    print(f"{risk:9.2f} | {p['w_rf']:9.2f} | {p['w_tangent']:14.2f} | " + 
+          f"{p['return']*100:6.2f}% | {p['volatility']*100:10.2f}% | {p['sharpe']:5.3f}")
+
+# Simulación de rendimiento histórico
+try:
+    # Calcular el rendimiento histórico de la cartera tangente
+    portfolio_returns = returns_df.dot(tangent_weights_real)
+    
+    # Simular $10,000 invertidos
+    initial_investment = 10000
+    cumulative_returns = (1 + portfolio_returns).cumprod() * initial_investment
+    
+    # Graficar
+    plt.figure(figsize=(12, 6))
+    cumulative_returns.plot()
+    plt.title('Rendimiento de $10,000 invertidos en la Cartera Tangente')
+    plt.ylabel('Valor de la Cartera ($)')
+    plt.xlabel('Fecha')
+    plt.grid(True)
+    plt.savefig('rendimiento_historico.png', dpi=300)
+    plt.show()
+    
+    # Comparar con un benchmark (S&P 500)
+    try:
+        benchmark = yf.download('^GSPC', start=start_date, end=end_date)['Adj Close']
+        benchmark_returns = benchmark.pct_change().dropna()
+        benchmark_cumulative = (1 + benchmark_returns).cumprod() * initial_investment
+        
+        # Graficar comparación
+        plt.figure(figsize=(12, 6))
+        cumulative_returns.plot(label='Cartera Optimizada')
+        benchmark_cumulative.plot(label='S&P 500')
+        plt.title('Comparación de Rendimiento: Cartera Optimizada vs S&P 500')
+        plt.ylabel('Valor de la Inversión ($)')
+        plt.xlabel('Fecha')
+        plt.legend()
+        plt.grid(True)
+        plt.savefig('comparacion_benchmark.png', dpi=300)
+        plt.show()
+        
+        # Métricas de comparación
+        portfolio_annual_return = (cumulative_returns.iloc[-1] / initial_investment) ** (252 / len(cumulative_returns)) - 1
+        benchmark_annual_return = (benchmark_cumulative.iloc[-1] / initial_investment) ** (252 / len(benchmark_cumulative)) - 1
+        
+        portfolio_vol_realized = portfolio_returns.std() * np.sqrt(252)
+        benchmark_vol_realized = benchmark_returns.std() * np.sqrt(252)
+        
+        print("\nComparación de Rendimiento:")
+        print(f"Cartera Optimizada - Rendimiento Anualizado: {portfolio_annual_return*100:.2f}%")
+        print(f"S&P 500 - Rendimiento Anualizado: {benchmark_annual_return*100:.2f}%")
+        
+        print(f"Cartera Optimizada - Volatilidad Anualizada: {portfolio_vol_realized*100:.2f}%")
+        print(f"S&P 500 - Volatilidad Anualizada: {benchmark_vol_realized*100:.2f}%")
+        
+        print(f"Cartera Optimizada - Ratio de Sharpe: {(portfolio_annual_return - current_rf_rate) / portfolio_vol_realized:.4f}")
+        print(f"S&P 500 - Ratio de Sharpe: {(benchmark_annual_return - current_rf_rate) / benchmark_vol_realized:.4f}")
+        
+    except Exception as e:
+        print(f"Error al descargar datos del benchmark: {e}")
+        
+except Exception as e:
+    print(f"Error al calcular el rendimiento histórico: {e}")
+
+# Ejercicio de evaluación: Restricción de 30% máximo por activo
+def optimize_portfolio_with_constraints(returns, cov_matrix, risk_free_rate, max_weight=0.3):
+    """Encuentra la cartera con restricciones adicionales"""
+    num_assets = len(returns)
+    args = (returns, cov_matrix, risk_free_rate)
+    
+    constraints = [
+        {'type': 'eq', 'fun': lambda x: np.sum(x) - 1},  # Suma = 1
+    ]
+    
+    bounds = tuple((0, max_weight) for asset in range(num_assets))
+    
+    initial_guess = np.array([1/num_assets] * num_assets)
+    
+    result = minimize(negative_sharpe, 
+                     initial_guess, 
+                     args=args, 
+                     method='SLSQP', 
+                     bounds=bounds, 
+                     constraints=constraints)
+    
+    return result['x']
+
+# Encontrar la cartera tangente con restricción del 30%
+constrained_weights = optimize_portfolio_with_constraints(
+    expected_returns_array, cov_matrix_array, current_rf_rate, 0.3)
+constrained_ret = portfolio_return(constrained_weights, expected_returns_array)
+constrained_vol = portfolio_volatility(constrained_weights, cov_matrix_array)
+constrained_sharpe = sharpe_ratio(constrained_weights, expected_returns_array, cov_matrix_array, current_rf_rate)
+
+print("\nEJERCICIO DE EVALUACIÓN")
+print("-" * 50)
+print("1. Cartera tangente con restricción del 30% por activo:")
+for i, symbol in enumerate(symbols):
+    print(f"{symbol}: {constrained_weights[i]*100:.2f}%")
+
+print(f"\nRendimiento esperado: {constrained_ret*100:.2f}%")
+print(f"Volatilidad: {constrained_vol*100:.2f}%")
+print(f"Ratio de Sharpe: {constrained_sharpe:.4f}")
+print("-" * 50)
+
+# 2. Cartera mixta con la mitad de la volatilidad de la cartera tangente
+target_vol = tangent_vol_real / 2
+target_risk_aversion = target_vol / tangent_vol_real
+
+half_vol_portfolio = get_mixed_portfolio(
+    tangent_weights_real, current_rf_rate, expected_returns_array, cov_matrix_array, target_risk_aversion)
+
+print("2. Cartera mixta con la mitad de volatilidad:")
+print(f"Proporción en activo libre de riesgo: {half_vol_portfolio['w_rf']*100:.2f}%")
+print(f"Proporción en cartera tangente: {half_vol_portfolio['w_tangent']*100:.2f}%")
+print(f"Rendimiento esperado: {half_vol_portfolio['return']*100:.2f}%")
+print(f"Volatilidad: {half_vol_portfolio['volatility']*100:.2f}%")
+print(f"Ratio de Sharpe: {half_vol_portfolio['sharpe']:.4f}")
+print("-" * 50)
+
+# 3. Comparación de ratios de Sharpe
+print("3. Comparación de Ratios de Sharpe:")
+print(f"Ratio de Sharpe de la cartera tangente: {tangent_sharpe_real:.4f}")
+print(f"Ratio de Sharpe de la cartera tangente con restricción: {constrained_sharpe:.4f}")
+print(f"Ratio de Sharpe de la cartera mixta de menor volatilidad: {half_vol_portfolio['sharpe']:.4f}")
+
+# Visualización de las tres carteras
+plt.figure(figsize=(12, 8))
+
+# Graficar la frontera eficiente
+plt.scatter(results[0,:], results[1,:], c=results[2,:], 
+          cmap='viridis', marker='o', s=10, alpha=0.1)
+
+# Marcar el activo libre de riesgo
+plt.scatter(0, current_rf_rate, c='red', marker='o', s=200, label='Activo Libre de Riesgo')
+
+# Marcar las tres carteras
+plt.scatter(tangent_vol_real, tangent_ret_real, c='red', marker='*', s=300, label='Cartera Tangente')
+plt.scatter(constrained_vol, constrained_ret, c='blue', marker='*', s=300, label='Cartera Restringida (30%)')
+plt.scatter(half_vol_portfolio['volatility'], half_vol_portfolio['return'], c='green', marker='*', s=300, 
+           label='Cartera Mixta (50% Volatilidad)')
+
+# Dibujar la CML
+plt.plot([0, max_vol], [current_rf_rate, current_rf_rate + 
+                        (tangent_ret_real - current_rf_rate) * max_vol / tangent_vol_real], 
+        'r--', linewidth=2, label='CML')
+
+plt.colorbar(label='Ratio de Sharpe')
+plt.xlabel('Volatilidad (Desviación Estándar)')
+plt.ylabel('Rendimiento Esperado')
+plt.title('Comparación de Carteras - Ejercicio de Evaluación')
+plt.legend()
+plt.grid(True)
+plt.savefig('comparacion_carteras.png', dpi=300)
+plt.show()
+
+print("\n¡Análisis completado!")
