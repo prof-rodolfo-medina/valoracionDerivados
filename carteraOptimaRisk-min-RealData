@@ -1,0 +1,202 @@
+# Optimización de Carteras con Datos Reales (Parte 1)
+# Implementación práctica de la Teoría de Carteras Mixtas
+# Universidad Internacional de La Rioja
+
+import numpy as np
+import pandas as pd
+import matplotlib.pyplot as plt
+from scipy.optimize import minimize
+import seaborn as sns
+import yfinance as yf
+
+# Configuración de visualización
+plt.style.use('seaborn-v0_8-darkgrid')  # Para versiones recientes
+plt.rcParams['figure.figsize'] = (12, 6)
+plt.rcParams['font.size'] = 12
+sns.set_palette('viridis')
+
+# Reutilizamos funciones del archivo anterior
+def portfolio_return(weights, returns):
+    """Calcula el rendimiento esperado de una cartera"""
+    return np.sum(weights * returns)
+
+def portfolio_volatility(weights, cov_matrix):
+    """Calcula la volatilidad (desviación estándar) de una cartera"""
+    return np.sqrt(np.dot(weights.T, np.dot(cov_matrix, weights)))
+
+def sharpe_ratio(weights, returns, cov_matrix, risk_free_rate):
+    """Calcula el ratio de Sharpe de una cartera"""
+    p_ret = portfolio_return(weights, returns)
+    p_vol = portfolio_volatility(weights, cov_matrix)
+    return (p_ret - risk_free_rate) / p_vol
+
+def negative_sharpe(weights, returns, cov_matrix, risk_free_rate):
+    """Función objetivo para minimización (negativo del ratio de Sharpe)"""
+    return -sharpe_ratio(weights, returns, cov_matrix, risk_free_rate)
+
+def optimize_tangent_portfolio(returns, cov_matrix, risk_free_rate):
+    """Encuentra la cartera tangente (máximo Sharpe ratio)"""
+    num_assets = len(returns)
+    args = (returns, cov_matrix, risk_free_rate)
+    constraints = ({'type': 'eq', 'fun': lambda x: np.sum(x) - 1})
+    bounds = tuple((0, 1) for asset in range(num_assets))
+    
+    initial_guess = np.array([1/num_assets] * num_assets)
+    
+    result = minimize(negative_sharpe, 
+                     initial_guess, 
+                     args=args, 
+                     method='SLSQP', 
+                     bounds=bounds, 
+                     constraints=constraints)
+    
+    return result['x']
+
+def get_mixed_portfolio(tangent_weights, risk_free_rate, returns, cov_matrix, risk_aversion):
+    """
+    Construye una cartera mixta entre el activo libre de riesgo 
+    y la cartera tangente según el nivel de aversión al riesgo
+    """
+    tangent_ret = portfolio_return(tangent_weights, returns)
+    tangent_vol = portfolio_volatility(tangent_weights, cov_matrix)
+    
+    w_tangent = risk_aversion
+    w_rf = 1 - risk_aversion
+    
+    mixed_ret = w_rf * risk_free_rate + w_tangent * tangent_ret
+    mixed_vol = w_tangent * tangent_vol
+    mixed_sharpe = (mixed_ret - risk_free_rate) / mixed_vol if mixed_vol > 0 else 0
+    
+    return {
+        'w_tangent': w_tangent,
+        'w_rf': w_rf,
+        'return': mixed_ret,
+        'volatility': mixed_vol,
+        'sharpe': mixed_sharpe
+    }
+
+# Definir símbolos y fechas
+symbols = ['AAPL', 'MSFT', 'AMZN', 'BRK-B', 'JNJ']
+start_date = '2018-01-01'
+end_date = '2023-01-01'
+
+# Descargar datos
+try:
+    print(f"Descargando datos para {symbols} desde {start_date} hasta {end_date}...")
+    df = yf.download(symbols, start=start_date, end=end_date)['Adj Close']
+    
+    # Mostrar primeras filas
+    print("\nPrimeras filas del DataFrame:")
+    print(df.head())
+    
+    # Calcular rendimientos diarios
+    returns_df = df.pct_change().dropna()
+    
+    # Estadísticas anualizadas
+    expected_returns = returns_df.mean() * 252
+    cov_matrix_annual = returns_df.cov() * 252
+    
+    print("\nRendimientos esperados anualizados:")
+    print(expected_returns)
+    
+    print("\nMatriz de covarianza anualizada (primeras 2 filas y columnas):")
+    print(cov_matrix_annual.iloc[:2, :2])
+    
+except Exception as e:
+    print(f"Error al descargar datos: {e}")
+    print("Usando datos de ejemplo...")
+    # Datos de ejemplo en caso de error
+    expected_returns = pd.Series({
+        'AAPL': 0.15,
+        'MSFT': 0.12,
+        'AMZN': 0.25,
+        'BRK-B': 0.10,
+        'JNJ': 0.08
+    })
+    
+    # Matriz de covarianza simplificada
+    cov_matrix_annual = pd.DataFrame({
+        'AAPL': [0.04, 0.02, 0.025, 0.01, 0.01],
+        'MSFT': [0.02, 0.03, 0.02, 0.01, 0.01],
+        'AMZN': [0.025, 0.02, 0.06, 0.02, 0.01],
+        'BRK-B': [0.01, 0.01, 0.02, 0.025, 0.01],
+        'JNJ': [0.01, 0.01, 0.01, 0.01, 0.02]
+    }, index=symbols)
+    
+    # Crear un dataframe ficticio para los cálculos posteriores
+    date_range = pd.date_range(start=start_date, end=end_date, freq='B')
+    returns_df = pd.DataFrame(np.random.normal(0, 0.01, (len(date_range), len(symbols))), 
+                              index=date_range, columns=symbols)
+
+# Tasa libre de riesgo actual (ejemplo: T-bills)
+current_rf_rate = 0.04
+
+# Convertir series a arrays de NumPy para usar con nuestras funciones
+expected_returns_array = expected_returns.values
+cov_matrix_array = cov_matrix_annual.values
+
+# Encontrar la cartera tangente con datos reales
+tangent_weights_real = optimize_tangent_portfolio(
+    expected_returns_array, cov_matrix_array, current_rf_rate)
+
+# Resultados
+tangent_ret_real = portfolio_return(tangent_weights_real, expected_returns_array)
+tangent_vol_real = portfolio_volatility(tangent_weights_real, cov_matrix_array)
+tangent_sharpe_real = sharpe_ratio(
+    tangent_weights_real, expected_returns_array, cov_matrix_array, current_rf_rate)
+
+# Mostrar composición de la cartera
+print("\nComposición de la cartera tangente:")
+for i, symbol in enumerate(symbols):
+    print(f"{symbol}: {tangent_weights_real[i]*100:.2f}%")
+
+print(f"\nRendimiento esperado: {tangent_ret_real*100:.2f}%")
+print(f"Volatilidad: {tangent_vol_real*100:.2f}%")
+print(f"Ratio de Sharpe: {tangent_sharpe_real:.4f}")
+print("-" * 50)
+
+# Generar carteras aleatorias para visualizar la frontera
+num_portfolios = 10000
+results = np.zeros((3, num_portfolios))
+weights_record = []
+
+for i in range(num_portfolios):
+    weights = np.random.random(len(symbols))
+    weights /= np.sum(weights)  # Normalizar a suma 1
+    weights_record.append(weights)
+    
+    # Calcular métricas
+    portfolio_ret = portfolio_return(weights, expected_returns_array)
+    portfolio_vol = portfolio_volatility(weights, cov_matrix_array)
+    portfolio_sharpe = (portfolio_ret - current_rf_rate) / portfolio_vol
+    
+    # Guardar resultados
+    results[0,i] = portfolio_vol
+    results[1,i] = portfolio_ret
+    results[2,i] = portfolio_sharpe
+
+# Visualización de la frontera eficiente
+plt.figure(figsize=(12, 8))
+plt.scatter(results[0,:], results[1,:], c=results[2,:], 
+          cmap='viridis', marker='o', s=10, alpha=0.3)
+
+# Marcar la cartera tangente
+plt.scatter(tangent_vol_real, tangent_ret_real, c='red', marker='*', s=300, label='Cartera Tangente')
+
+# Marcar el activo libre de riesgo
+plt.scatter(0, current_rf_rate, c='red', marker='o', s=200, label='Activo Libre de Riesgo')
+
+# Dibujar la CML
+max_vol = np.max(results[0,:]) * 1.2
+plt.plot([0, max_vol], [current_rf_rate, current_rf_rate + 
+                        (tangent_ret_real - current_rf_rate) * max_vol / tangent_vol_real], 
+        'r--', linewidth=2, label='CML')
+
+plt.colorbar(label='Ratio de Sharpe')
+plt.xlabel('Volatilidad (Desviación Estándar)')
+plt.ylabel('Rendimiento Esperado')
+plt.title('Frontera Eficiente - Datos Reales')
+plt.legend()
+plt.grid(True)
+plt.savefig('frontera_real.png', dpi=300)
+plt.show()
